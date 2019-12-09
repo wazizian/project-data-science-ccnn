@@ -16,7 +16,7 @@ class ApproxKernelMachine:
         else:
             raise NotImplementedError
 
-    def fit(self, X: np.array):
+    def fit(self, X: np.ndarray):
         """
         X has shape (n, P, d1)
         """
@@ -31,7 +31,7 @@ class ApproxKernelMachine:
         dataset = data.TensorDataset(Z_tensor, labels)
         return dataset
     
-    def transform(self, X: np.array) -> torch.Tensor:
+    def transform(self, X: np.ndarray) -> torch.Tensor:
         """
         X has shape (b, P, d1)
         """
