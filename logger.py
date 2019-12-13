@@ -5,7 +5,7 @@ class Logger:
         self.n_iterations = n_iterations
         self.print_freq = print_freq if print_freq else n_iterations//100
 
-    def log_iteration(self, epoch, iteration, loss):
+    def log_iteration(self, epoch, iteration, loss, accuracy):
         self.losses.append(loss)
         if epoch % self.print_freq == 0:
-            print("[{}/{}, {}/{}] Loss = {}".format(epoch, self.n_epochs, iteration, self.n_iterations, loss))
+            print("[{}/{}, {}/{}] Loss = {} Accuracy = {}".format(epoch, self.n_epochs, iteration, self.n_iterations, loss, accuracy))

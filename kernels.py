@@ -24,7 +24,7 @@ class ApproxKernelMachine:
         self.Q = self.kernel_approx.fit_transform(np.reshape(X, (self.n*self.P, self.d1)))
         assert self.Q.shape == (self.n*self.P, self.m)
 
-    def buid_patch_dataset(self, labels: torch.Tensor) -> data.Dataset:
+    def buid_kernel_patch_dataset(self, labels: torch.Tensor) -> data.Dataset:
         assert labels.size() == (self.n,)
         Z = np.reshape(self.Q, (self.n, self.P, self.m))
         Z_tensor = torch.from_numpy(Z)
@@ -33,6 +33,7 @@ class ApproxKernelMachine:
     
     def transform(self, X: np.ndarray) -> torch.Tensor:
         """
+        For prediction
         X has shape (b, P, d1)
         """
         assert X.shape[1] == self.P and X.shape[2] == self.d1
