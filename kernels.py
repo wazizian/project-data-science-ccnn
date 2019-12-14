@@ -21,6 +21,7 @@ class ApproxKernelMachine:
         X has shape (n, P, d1)
         """
         self.n, self.P, self.d1 = X.shape
+        print('Fitting kernel with {} samples of shape {}x{}'.format(self.n, self.P, self.d1))
         self.Q = self.kernel_approx.fit_transform(np.reshape(X, (self.n*self.P, self.d1)))
         assert self.Q.shape == (self.n*self.P, self.m)
 
@@ -29,6 +30,7 @@ class ApproxKernelMachine:
         Z = np.reshape(self.Q, (self.n, self.P, self.m))
         Z_tensor = torch.from_numpy(Z)
         dataset = data.TensorDataset(Z_tensor, labels)
+        print("Built kernel matrix as dataset with {} samples of shape {}x{}".format(len(dataset), self.P, self.m))
         return dataset
     
     def transform(self, X: np.ndarray) -> torch.Tensor:

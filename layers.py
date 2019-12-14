@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data as data
 from kernels import ApproxKernelMachine
+import logger
 import numpy as np
 import sklearn.feature_extraction.image as image
 
@@ -29,14 +30,15 @@ class CCNNLayerLinear(nn.Module):
         if p == 'fro':
             norm = torch.norm(self.A.weight, p='fro')
             if norm > self.R:
-                self.A = (self.R/norm) * self.A
+                self.A.weight.data = (self.R/norm) * self.A.weight
         elif p == 'nuc':
             raise NotImplementedError
         else:
             raise NotImplementedError
 
     def train(self, dataloaderZ: data.DataLoader, criterion, p, n_epochs):
-        optimizer = torch.optim.SGD(self.parameters())
+        optimizer = torch.optim.SGD(self.parameters(), lr=1e-3)
+        print("Beginning training with {} batches of size <={}.".format(len(dataloaderZ), dataloaderZ.batch_size))
         log = logger.Logger(n_epochs, len(dataloaderZ))
         for epoch in range(n_epochs):
             for iteration, (z, y) in enumerate(dataloaderZ):
@@ -46,8 +48,8 @@ class CCNNLayerLinear(nn.Module):
                 loss.backward()
                 optimizer.step()
                 self.project(p)
-                accuracy = (output.max(-1)[1] == y).mean()
-                log.log_iteration(epoch, iteration, loss)
+                accuracy = (output.max(-1)[1] == y).float().mean()
+                log.log_iteration(epoch, iteration, loss, accuracy)
         return logger
 
 
@@ -81,14 +83,14 @@ class CCNNLayer(nn.Module):
     def build_train_dataset(self, dataset: data.Dataset) -> data.Dataset:
         inputs, labels = self.build_patch_dataset(dataset)
         self.kernel.fit(inputs)
-        self.train_dataset = self.kernel.buid_kernel_patch_dataset(labels)
+        return self.kernel.buid_kernel_patch_dataset(labels)
 
-    def train(self, dataset, criterion, p, n_epochs, batch_size):
-        self.build_train_dataset(dataset)
-        dataloader = data.DataLoader(self.train_dataset, batch_size=batch_size)
-        self.linear.train(dataloader, criterion, p, n_epochs)
+    def train(self, dataset, criterion, p, n_epochs, batch_size) -> logger.Logger:
+        train_dataset = self.build_train_dataset(dataset)
+        dataloader = data.DataLoader(train_dataset, batch_size=batch_size)
+        return self.linear.train(dataloader, criterion, p, n_epochs)
 
-    def forward(self, imgs: torch.Tensor):
+    def forward(self, imgs: torch.Tensor) -> torch.Tensor:
         patches = self.extract_patches(imgs)
         kernel_patches = self.kernel.transform(patches.numpy())
         return self.linear.forward(kernel_patches)
