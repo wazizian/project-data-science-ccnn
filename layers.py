@@ -86,7 +86,7 @@ class CCNNLayerLinear(nn.Module):
 
 
 class CCNNLayer(nn.Module):
-    def __init__(self, m, img_shape, d2, R, patch_dim, patch_stride, kernel, gamma=0.2, first=True, last=True, avg_pooling_kernel_size:int =1):
+    def __init__(self, m, img_shape, d2, R, patch_dim, patch_stride, kernel, r=None, gamma=0.2, avg_pooling_kernel_size:int =1):
         super(CCNNLayer, self).__init__()
         (c, h, w) = img_shape
         #this code is only meant for square images
@@ -96,8 +96,8 @@ class CCNNLayer(nn.Module):
         self.linear = CCNNLayerLinear(m, self.P, d2, R, avg_pooling_kernel_size=avg_pooling_kernel_size)
         self.patch_dim = patch_dim
         self.patch_stride = patch_stride
-        self.first, self.last = first, last
-        print('Creating CCNN layer for input of shape {}x{}x{} with m={} P={}'.format(*img_shape, m, self.P))
+        self.r = r if r else min(*self.linear.A.weight.size())
+        print('Creating CCNN layer for input of shape {}x{}x{} with m={} P={} P\'={}'.format(*img_shape, m, self.P, self.linear.Pprime))
     
     #WARNING: the rest is maybe not made for multichannels
     def extract_patches(self, imgs: torch.Tensor) -> torch.Tensor:
@@ -113,8 +113,7 @@ class CCNNLayer(nn.Module):
     def build_patch_dataset(self, dataset: data.Dataset) -> (np.ndarray, torch.Tensor):
         length = len(dataset)
         (inputs, labels) = next(data.DataLoader(dataset, batch_size=length).__iter__())
-        if self.first:
-            inputs = self.extract_patches(inputs)
+        inputs = self.extract_patches(inputs)
         return inputs.numpy(), labels
 
     def build_train_dataset(self, dataset: data.Dataset) -> data.Dataset:
@@ -123,22 +122,25 @@ class CCNNLayer(nn.Module):
         return self.kernel.buid_kernel_patch_dataset(labels)
 
     def train(self, dataset, criterion, p, n_epochs, batch_size, lr) -> logger.Logger:
-        if self.first:
-            self.train_dataset = self.build_train_dataset(dataset)
-        else:
-            self.train_dataset = dataset
+        self.train_dataset = self.build_train_dataset(dataset)
         dataloader = data.DataLoader(self.train_dataset, batch_size=batch_size)
         return self.linear.train(dataloader, criterion, p, n_epochs, lr)
 
     def build_next_layer_dataset(self) -> data.Dataset:
         (inputs, labels) = next(data.DataLoader(self.train_dataset, batch_size=len(self.train_dataset).__iter__()))
         transformed = self.linear.apply_filters(inputs)
+        # transformed is supposed to have shape (b, r, Pprime)
+        # r is now the number of channels
+        # as Pprime = hprime**2, we can see transformed as (b, r, hprime, hprime) dataset of images
+        assert transformed.size(1) == self.r
+        assert transformed.size(2) == self.linear.Pprime
+        transformed = transformed.view(-1, self.r, self.linear.hprime, self.linear.hprime)
         return data.TensorDataset(transformed, labels)
 
-    def forward(self, imgs: torch.Tensor) -> torch.Tensor:
-        patches = self.extract_patches(imgs) if self.first else imgs
+    def forward(self, imgs: torch.Tensor, last=True) -> torch.Tensor:
+        patches = self.extract_patches(imgs)
         kernel_patches = self.kernel.transform(patches.numpy()) #has shape b, P, m
-        if self.last:
+        if last:
             return self.linear.forward(kernel_patches)
         else:
             return self.linear.apply_filters(kernel_patches)
