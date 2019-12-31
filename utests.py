@@ -18,7 +18,7 @@ class BasicTestCase(unittest.TestCase):
         X = np.random.randn(n, P, d1)
         batch = np.random.randn(b, P, d1)
         kernel.fit(X)
-        dset = kernel.buid_patch_dataset(torch.Tensor(np.random.randn(n)))
+        dset = kernel.buid_kernel_patch_dataset(torch.Tensor(np.random.randn(n)))
         self.assertEqual(dset[0][0].size(), (P, m))
         output = kernel.transform(batch)
         self.assertEqual(output.size(), (b, P, m))

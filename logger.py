@@ -10,4 +10,4 @@ class Logger:
         self.losses.append(loss)
         self.accuracies.append(accuracy)
         if iteration % self.print_freq == 0:
-            print("[{}/{}, {}/{}] Loss = {:.2f} Accuracy = {:.2f}%".format(epoch, self.n_epochs, iteration, self.n_iterations, loss, accuracy*100))
+            print("[{}/{}, {:2d}/{}] Loss = {:.2f} Accuracy = {:.2f}%".format(epoch, self.n_epochs, iteration, self.n_iterations, loss, accuracy*100))

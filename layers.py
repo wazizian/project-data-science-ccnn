@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.data as data
 from kernels import ApproxKernelMachine
 import logger
@@ -36,8 +37,8 @@ class CCNNLayerLinear(nn.Module):
         else:
             raise NotImplementedError
 
-    def train(self, dataloaderZ: data.DataLoader, criterion, p, n_epochs):
-        optimizer = torch.optim.SGD(self.parameters(), lr=1e-3)
+    def train(self, dataloaderZ: data.DataLoader, criterion, p, n_epochs, lr):
+        optimizer = torch.optim.SGD(self.parameters(), lr=lr)
         print("Beginning training with {} batches of size <={}.".format(len(dataloaderZ), dataloaderZ.batch_size))
         log = logger.Logger(n_epochs, len(dataloaderZ))
         for epoch in range(n_epochs):
@@ -52,32 +53,50 @@ class CCNNLayerLinear(nn.Module):
                 log.log_iteration(epoch, iteration, loss, accuracy)
         return logger
 
+    @torch.no_grad()
+    def compute_approx_svd(self, r):
+        U, _, _ = torch.svd(self.A.weight)
+        self.Uhat = U[:, :r]
+
+    @torch.no_grad()
+    def apply_filters(self, Z: torch.Tensor) -> torch.Tensor:
+        """
+        Z has shape (b, P, m)
+        self.Uhat has shape (m, r)
+        """
+        return F.linear(Z, self.Uhat.T).permute(1, 2)
 
 
 class CCNNLayer(nn.Module):
-    def __init__(self, m, P, d2, R, patch_dim, patch_stride, kernel, gamma=0.2):
+    def __init__(self, m, img_shape, d2, R, patch_dim, patch_stride, kernel, gamma=0.2, first=True, last=True):
         super(CCNNLayer, self).__init__()
+        (c, h, w) = img_shape
+        #this code is only meant for square images
+        assert h == w
+        self.P = c * ((h - patch_dim)//patch_stride + 1)**2
         self.kernel = ApproxKernelMachine(kernel, m, gamma=gamma)
-        self.linear = CCNNLayerLinear(m, P, d2, R)
+        self.linear = CCNNLayerLinear(m, self.P, d2, R)
         self.patch_dim = patch_dim
         self.patch_stride = patch_stride
-        self.P = P
+        self.first, self.last = first, last
+        print('Creating CCNN layer for input of shape {}x{}x{} with m={} P={}'.format(*img_shape, m, self.P))
     
     #WARNING: the rest is maybe not made for multichannels
     def extract_patches(self, imgs: torch.Tensor) -> torch.Tensor:
         """
         imgs has shape (b, c, h, w)
-        output has shape (n_samples, P, d1) where d1 = self.patch_dim**2
+        output has shape (n_samples, P, d1) where d1 = c * self.patch_dim**2
         """
         (b, c, h, w) = imgs.size()
         patches = imgs.unfold(2, self.patch_dim, self.patch_stride).unfold(3, self.patch_dim, self.patch_stride)
-        patches = patches.reshape(b, self.P, self.patch_dim**2)
+        patches = patches.reshape(b, self.P, c * self.patch_dim**2)
         return patches
 
     def build_patch_dataset(self, dataset: data.Dataset) -> (np.ndarray, torch.Tensor):
         length = len(dataset)
         (inputs, labels) = next(data.DataLoader(dataset, batch_size=length).__iter__())
-        inputs = self.extract_patches(inputs)
+        if self.first:
+            inputs = self.extract_patches(inputs)
         return inputs.numpy(), labels
 
     def build_train_dataset(self, dataset: data.Dataset) -> data.Dataset:
@@ -85,14 +104,27 @@ class CCNNLayer(nn.Module):
         self.kernel.fit(inputs)
         return self.kernel.buid_kernel_patch_dataset(labels)
 
-    def train(self, dataset, criterion, p, n_epochs, batch_size) -> logger.Logger:
-        train_dataset = self.build_train_dataset(dataset)
-        dataloader = data.DataLoader(train_dataset, batch_size=batch_size)
-        return self.linear.train(dataloader, criterion, p, n_epochs)
+    def train(self, dataset, criterion, p, n_epochs, batch_size, lr) -> logger.Logger:
+        if self.first:
+            self.train_dataset = self.build_train_dataset(dataset)
+        else:
+            self.train_dataset = dataset
+        dataloader = data.DataLoader(self.train_dataset, batch_size=batch_size)
+        return self.linear.train(dataloader, criterion, p, n_epochs, lr)
+
+    def build_next_layer_dataset(self) -> data.Dataset:
+        (inputs, labels) = next(data.DataLoader(self.train_dataset, batch_size=len(self.train_dataset).__iter__()))
+        transformed = self.linear.apply_filters(inputs)
+        return data.TensorDataset(transformed, labels)
 
     def forward(self, imgs: torch.Tensor) -> torch.Tensor:
-        patches = self.extract_patches(imgs)
-        kernel_patches = self.kernel.transform(patches.numpy())
-        return self.linear.forward(kernel_patches)
+        patches = self.extract_patches(imgs) if self.first else imgs
+        kernel_patches = self.kernel.transform(patches.numpy()) #has shape b, P, m
+        if self.last:
+            return self.linear.forward(kernel_patches)
+        else:
+            return self.linear.apply_filters(kernel_patches)
 
+#class CCNN(nn.Module):
+#    def __init__(self, m_lst, P_lst, d_lst, R, patch_dim_lst, patch_stride_lst, kernel_lst, gamma_lst):
 
