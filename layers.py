@@ -8,7 +8,7 @@ import numpy as np
 import sklearn.feature_extraction.image as image
 
 class CCNNLayerLinear(nn.Module):
-    def __init__(self, m: int, P: int, d2: int, R: float):
+    def __init__(self, m: int, P: int, d2: int, R: float, avg_pooling_kernel_size: int=1):
         """
         P: nb of patches
         m: rank of kernel factorization
@@ -16,15 +16,32 @@ class CCNNLayerLinear(nn.Module):
         R: norm constraint
         """
         super(CCNNLayerLinear, self).__init__()
-        self.A = nn.Linear(m * P, d2, bias=False)
         self.m = m
         self.P = P
+        self.h = int(np.sqrt(self.P))
+        assert self.h**2 == self.P
+        self.hprime = self.h // avg_pooling_kernel_size
+        self.Pprime = self.hprime**2
+        self.A = nn.Linear(m * self.Pprime, d2, bias=False)
         self.d2 = d2
         self.R = R
+        self.avg_pooling_layer = nn.AvgPool2d(avg_pooling_kernel_size)
+
+    def avg_pooling(self, z: torch.Tensor) -> torch.Tensor:
+        """
+        z has size (b, P, d1) and we assume P = h**2
+        we apply 2D average pooling to z.view(b, h, h, d1)
+        """
+        b, P, d1 = z.size()
+        assert P == self.P
+        return self.avg_pooling_layer(z.view(b, self.h, self.h, d1)).view(b, -1, d1)
+
 
     def forward(self, z):
         assert z.size()[1:] == (self.P, self.m)
-        return self.A(z.view(-1, self.P * self.m))
+        z = self.avg_pooling(z)
+        assert z.size()[1:] == (self.Pprime, self.m)
+        return self.A(z.view(-1, self.Pprime * self.m))
 
     @torch.no_grad()
     def project(self, p):
@@ -64,18 +81,19 @@ class CCNNLayerLinear(nn.Module):
         Z has shape (b, P, m)
         self.Uhat has shape (m, r)
         """
+        Z = self.avg_pooling(Z)
         return F.linear(Z, self.Uhat.T).permute(1, 2)
 
 
 class CCNNLayer(nn.Module):
-    def __init__(self, m, img_shape, d2, R, patch_dim, patch_stride, kernel, gamma=0.2, first=True, last=True):
+    def __init__(self, m, img_shape, d2, R, patch_dim, patch_stride, kernel, gamma=0.2, first=True, last=True, avg_pooling_kernel_size:int =1):
         super(CCNNLayer, self).__init__()
         (c, h, w) = img_shape
         #this code is only meant for square images
         assert h == w
-        self.P = c * ((h - patch_dim)//patch_stride + 1)**2
+        self.P = ((h - patch_dim)//patch_stride + 1)**2
         self.kernel = ApproxKernelMachine(kernel, m, gamma=gamma)
-        self.linear = CCNNLayerLinear(m, self.P, d2, R)
+        self.linear = CCNNLayerLinear(m, self.P, d2, R, avg_pooling_kernel_size=avg_pooling_kernel_size)
         self.patch_dim = patch_dim
         self.patch_stride = patch_stride
         self.first, self.last = first, last
