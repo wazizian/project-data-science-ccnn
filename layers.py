@@ -6,6 +6,7 @@ from kernels import ApproxKernelMachine
 import logger
 import numpy as np
 import sklearn.feature_extraction.image as image
+from typing import List
 
 class CCNNLayerLinear(nn.Module):
     def __init__(self, m: int, P: int, d2: int, R: float, avg_pooling_kernel_size: int=1):
@@ -72,8 +73,9 @@ class CCNNLayerLinear(nn.Module):
 
     @torch.no_grad()
     def compute_approx_svd(self, r):
-        U, _, _ = torch.svd(self.A.weight)
+        U, _, _ = torch.svd(self.A.weight.T.reshape(self.m, -1), some=False)
         self.Uhat = U[:, :r]
+        assert self.Uhat.size() == (self.m, r), (self.Uhat.size(), self.m, r)
 
     @torch.no_grad()
     def apply_filters(self, Z: torch.Tensor) -> torch.Tensor:
@@ -82,11 +84,11 @@ class CCNNLayerLinear(nn.Module):
         self.Uhat has shape (m, r)
         """
         Z = self.avg_pooling(Z)
-        return F.linear(Z, self.Uhat.T).permute(1, 2)
+        return F.linear(Z, self.Uhat.T).permute(0, 2, 1)
 
 
 class CCNNLayer(nn.Module):
-    def __init__(self, m, img_shape, d2, R, patch_dim, patch_stride, kernel, r=None, gamma=0.2, avg_pooling_kernel_size:int =1):
+    def __init__(self, img_shape, m, d2, R, patch_dim, patch_stride, kernel, r=None, gamma=0.2, avg_pooling_kernel_size:int =1):
         super(CCNNLayer, self).__init__()
         (c, h, w) = img_shape
         #this code is only meant for square images
@@ -96,10 +98,12 @@ class CCNNLayer(nn.Module):
         self.linear = CCNNLayerLinear(m, self.P, d2, R, avg_pooling_kernel_size=avg_pooling_kernel_size)
         self.patch_dim = patch_dim
         self.patch_stride = patch_stride
-        self.r = r if r else min(*self.linear.A.weight.size())
-        print('Creating CCNN layer for input of shape {}x{}x{} with m={} P={} P\'={}'.format(*img_shape, m, self.P, self.linear.Pprime))
+        #self.r = min(*self.linear.A.weight.T.reshape(m, -1).size(), r) if r else min(*self.linear.A.weight.size())
+        self.r = min(r,m) if r else m
+        if r and self.r < r:
+            print('Warning: r={} has been reduced to {}'.format(r, self.r))
+        print('Creating CCNN layer for input of shape {}x{}x{} with m={} P={} P\'={} d2={}'.format(*img_shape, m, self.P, self.linear.Pprime, d2))
     
-    #WARNING: the rest is maybe not made for multichannels
     def extract_patches(self, imgs: torch.Tensor) -> torch.Tensor:
         """
         imgs has shape (b, c, h, w)
@@ -124,15 +128,17 @@ class CCNNLayer(nn.Module):
     def train(self, dataset, criterion, p, n_epochs, batch_size, lr) -> logger.Logger:
         self.train_dataset = self.build_train_dataset(dataset)
         dataloader = data.DataLoader(self.train_dataset, batch_size=batch_size)
-        return self.linear.train(dataloader, criterion, p, n_epochs, lr)
+        logger = self.linear.train(dataloader, criterion, p, n_epochs, lr)
+        self.linear.compute_approx_svd(self.r)
+        return logger
 
     def build_next_layer_dataset(self) -> data.Dataset:
-        (inputs, labels) = next(data.DataLoader(self.train_dataset, batch_size=len(self.train_dataset).__iter__()))
+        (inputs, labels) = next(data.DataLoader(self.train_dataset, batch_size=len(self.train_dataset)).__iter__())
         transformed = self.linear.apply_filters(inputs)
         # transformed is supposed to have shape (b, r, Pprime)
         # r is now the number of channels
         # as Pprime = hprime**2, we can see transformed as (b, r, hprime, hprime) dataset of images
-        assert transformed.size(1) == self.r
+        assert transformed.size(1) == self.r, (transformed.size(), self.r)
         assert transformed.size(2) == self.linear.Pprime
         transformed = transformed.view(-1, self.r, self.linear.hprime, self.linear.hprime)
         return data.TensorDataset(transformed, labels)
@@ -143,8 +149,40 @@ class CCNNLayer(nn.Module):
         if last:
             return self.linear.forward(kernel_patches)
         else:
-            return self.linear.apply_filters(kernel_patches)
+            transformed = self.linear.apply_filters(kernel_patches)
+            transformed = transformed.view(-1, self.r, self.linear.hprime, self.linear.hprime)
+            return transformed
 
-#class CCNN(nn.Module):
-#    def __init__(self, m_lst, P_lst, d_lst, R, patch_dim_lst, patch_stride_lst, kernel_lst, gamma_lst):
+class CCNN(nn.Module):
+    def __init__(self, img_shape, layer_confs):
+        super(CCNN, self).__init__()
+        in_shape = img_shape
+        layer_lst = []
+        for conf in layer_confs:
+            current_layer = CCNNLayer(in_shape, **conf)
+            layer_lst.append(current_layer)
+            in_shape = (current_layer.r, current_layer.linear.hprime, current_layer.linear.hprime)
+        self.layers = nn.ModuleList(layer_lst)
+
+    def train(self, dataset, criterion, p, n_epochs, batch_size, lr) -> List[logger.Logger]:
+        train_dataset = dataset
+        loggers = []
+        for l in self.layers:
+            logger = l.train(train_dataset, criterion, p, n_epochs, batch_size, lr)
+            loggers.append(logger)
+            train_dataset = l.build_next_layer_dataset()
+        return loggers
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for l in self.layers[:-1]:
+            x = l.forward(x, last=False)
+        return self.layers[-1].forward(x, last=True)
+    
+    def forward_all(self, x: torch.Tensor) -> torch.Tensor:
+        predictions = []
+        for l in self.layers[:-1]:
+            predictions.append(l.forward(x, last=True))
+            x = l.forward(x, last=False)
+        predictions.append(self.layers[-1].forward(x, last=True))
+        return torch.stack(predictions)
 

@@ -27,6 +27,15 @@ def test(model: nn.Module, dataloader: data.DataLoader) -> float:
     acc /= i + 1
     return acc
 
+def test_all(model: nn.Module, dataloader: data.DataLoader) -> float:
+    print("Beginning testing")
+    acc = torch.zeros(len(model.layers))
+    for i, (x, y) in enumerate(dataloader):
+        pred = model.forward_all(x)
+        acc += (pred.max(-1)[1] == y[None,:]).float().mean(-1)
+    acc /= i + 1
+    return acc
+
 def mnist_experiment(args):
     #60k samples
     dataset_for_test     = torchvision.datasets.MNIST('dataset', train=True , transform=torchvision.transforms.ToTensor(), download=True)
@@ -40,15 +49,19 @@ def mnist_experiment(args):
         n_val = len(dataset_for_trainval) - n_train
         dataset_train, dataset_test = data.random_split(dataset_for_trainval, [n_train, n_val])
     print("Split for {}: {}/{} samples".format("test" if args.test else "validation", len(dataset_train), len(dataset_test)))
-    model = layers.CCNNLayer(m=args.approx_m,
-                            img_shape=(1, 28, 28),
-                            d2=10, #number of classes
-                            R=args.R, patch_dim=5, patch_stride=1, kernel='rbf', avg_pooling_kernel_size=2)
+    layer1 = {
+            'm':args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':16
+            }
+    layer2 = {
+            'm':args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':16
+            }
+    model = layers.CCNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
     model.train(dataset_train, nn.CrossEntropyLoss(), 'fro', n_epochs=args.epochs, batch_size=64, lr=args.lr)
     dataloader_test = data.DataLoader(dataset_test, batch_size=64)
-    acc = test(model, dataloader_test)
-    print("Accuracy: {:.2f}% on {} samples".format(acc*100, len(dataset_test)))
-    return acc
+    acc = test_all(model, dataloader_test)
+    for l, layer_acc in enumerate(acc):
+        print("Accuracy: {:.2f}% on {} samples for layer {}".format(layer_acc*100, len(dataset_test), l))
+    return acc[-1].item()
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -60,5 +73,3 @@ if __name__ == '__main__':
             'type': 'objective',
             'value': (1 - acc),
             }])
-
-    
