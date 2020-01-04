@@ -56,7 +56,7 @@ class CCNNLayerLinear(nn.Module):
             raise NotImplementedError
 
     def train(self, dataloaderZ: data.DataLoader, criterion, p, n_epochs, lr):
-        optimizer = torch.optim.SGD(self.parameters(), lr=lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         print("Beginning training with {} batches of size <={}.".format(len(dataloaderZ), dataloaderZ.batch_size))
         log = logger.Logger(n_epochs, len(dataloaderZ))
         for epoch in range(n_epochs):
@@ -73,18 +73,29 @@ class CCNNLayerLinear(nn.Module):
 
     @torch.no_grad()
     def compute_approx_svd(self, r):
-        U, _, _ = torch.svd(self.A.weight.T.reshape(self.m, -1), some=False)
+        real_A = self.A.weight.reshape(self.Pprime, self.m, self.d2).permute(1, 0, 2).reshape(self.m, self.Pprime * self.d2)
+        #U, _, _ = torch.svd(self.A.weight.T.reshape(self.m, -1), some=False)
+        U, s,V = torch.svd(real_A, some=True)
         self.Uhat = U[:, :r]
+        assert self.m == r
+        s = F.pad(s, pad=(0, V.size(1) - s.size(0)), value=0)
+        print(self.m, r, s.size(), V.size())
+        self.other = torch.einsum('i,ij->ij', s, V.T)
+        assert self.other.size() == (self.m, self.Pprime * self.d2)
+        self.other = self.other.reshape(self.m, self.Pprime, self.d2).permute(1, 0, 2).reshape(self.Pprime * self.m, self.d2)
         assert self.Uhat.size() == (self.m, r), (self.Uhat.size(), self.m, r)
 
     @torch.no_grad()
-    def apply_filters(self, Z: torch.Tensor) -> torch.Tensor:
+    def apply_filters(self, Z_in: torch.Tensor) -> torch.Tensor:
         """
         Z has shape (b, P, m)
         self.Uhat has shape (m, r)
         """
-        Z = self.avg_pooling(Z)
-        return F.linear(Z, self.Uhat.T).permute(0, 2, 1)
+        Z = self.avg_pooling(Z_in)
+        Z = F.linear(Z, self.Uhat.T)#.permute(0, 2, 1)
+        pred = F.linear(Z.view(-1, self.Pprime * self.m), self.other.T)
+        print(torch.norm(pred - self.forward(Z_in)))
+        return Z.permute(0, 2, 1)
 
 
 class CCNNLayer(nn.Module):
