@@ -16,6 +16,7 @@ parser.add_argument('--R', type=float, default=1)
 parser.add_argument('--epochs', type=int, default=10)
 parser.add_argument('--hunt', action='store_true', help="Hyperparameter search mode with orion")
 parser.add_argument('--test', action='store_true', help="Train on train+val and test on test")
+parser.add_argument('--eval_all', action='store_true')
 
 
 def test(model: nn.Module, dataloader: data.DataLoader) -> float:
@@ -50,18 +51,23 @@ def mnist_experiment(args):
         dataset_train, dataset_test = data.random_split(dataset_for_trainval, [n_train, n_val])
     print("Split for {}: {}/{} samples".format("test" if args.test else "validation", len(dataset_train), len(dataset_test)))
     layer1 = {
-            'm':args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':16
+            'm':args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':None, 'gamma':0.2,
             }
     layer2 = {
-            'm':args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':16
+            'm':args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':None, 'gamma':0.02,
             }
     model = layers.CCNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
     model.train(dataset_train, nn.CrossEntropyLoss(), 'fro', n_epochs=args.epochs, batch_size=64, lr=args.lr)
     dataloader_test = data.DataLoader(dataset_test, batch_size=64)
-    acc = test_all(model, dataloader_test)
-    for l, layer_acc in enumerate(acc):
-        print("Accuracy: {:.2f}% on {} samples for layer {}".format(layer_acc*100, len(dataset_test), l))
-    return acc[-1].item()
+    if args.eval_all:
+        acc = test_all(model, dataloader_test)
+        for l, layer_acc in enumerate(acc):
+            print("Accuracy: {:.2f}% on {} samples for layer {}".format(layer_acc*100, len(dataset_test), l))
+        return acc[-1].item()
+    else:
+        acc = test(model, dataloader_test)
+        print("Accuracy: {:.2f}% on {} samples".format(acc*100, len(dataset_test)))
+        return acc
 
 if __name__ == '__main__':
     args = parser.parse_args()
