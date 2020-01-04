@@ -18,30 +18,30 @@ class ApproxKernelMachine:
 
     def fit(self, X: np.ndarray):
         """
-        X has shape (n, P, d1)
+        X has shape (*, d1)
+        self.Q has shape (*, m)
         """
-        self.n, self.P, self.d1 = X.shape
-        print('Fitting kernel with {} samples of shape {}x{}'.format(self.n, self.P, self.d1))
-        self.Q = self.kernel_approx.fit_transform(np.reshape(X, (self.n*self.P, self.d1)))
-        assert self.Q.shape == (self.n*self.P, self.m)
+        self.X_shape = X.shape
+        print('Fitting kernel with samples of shape '.format(self.X_shape))
+        self.Q = self.kernel_approx.fit_transform(np.reshape(X, (-1, self.X_shape[-1])))
+        self.Q = np.reshape(self.Q, X.shape[:-1] + (self.m,))
 
     def buid_kernel_patch_dataset(self, labels: torch.Tensor) -> data.Dataset:
-        assert labels.size() == (self.n,)
-        Z = np.reshape(self.Q, (self.n, self.P, self.m))
-        Z_tensor = torch.from_numpy(Z).float()
+        assert labels.size() == (self.X_shape[0],)
+        Z_tensor = torch.from_numpy(self.Q).float()
         dataset = data.TensorDataset(Z_tensor, labels)
-        print("Built kernel matrix as dataset with {} samples of shape {}x{}".format(len(dataset), self.P, self.m))
+        print("Built kernel matrix as dataset of shape ".format(self.Q.shape))
         return dataset
     
     def transform(self, X: np.ndarray) -> torch.Tensor:
         """
         For prediction
-        X has shape (b, P, d1)
+        X has shape (*, d1)
         """
-        assert X.shape[1] == self.P and X.shape[2] == self.d1
+        assert X.shape[1:] == self.X_shape[1:]
         b = X.shape[0]
-        transformed = self.kernel_approx.transform(np.reshape(X, (b*self.P, self.d1)))
-        return torch.from_numpy(np.reshape(transformed, (b, self.P, self.m))).float()
+        transformed = self.kernel_approx.transform(np.reshape(X, (-1, self.X_shape[-1])))
+        return torch.from_numpy(np.reshape(transformed, (b,) + self.Q.shape[1:])).float()
 
         
         

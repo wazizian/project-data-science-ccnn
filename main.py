@@ -20,7 +20,6 @@ parser.add_argument('--eval_all', action='store_true')
 
 
 def test(model: nn.Module, dataloader: data.DataLoader) -> float:
-    print("Beginning testing")
     acc = 0.
     for i, (x, y) in enumerate(dataloader):
         pred = model(x)
@@ -51,10 +50,10 @@ def mnist_experiment(args):
         dataset_train, dataset_test = data.random_split(dataset_for_trainval, [n_train, n_val])
     print("Split for {}: {}/{} samples".format("test" if args.test else "validation", len(dataset_train), len(dataset_test)))
     layer1 = {
-            'm':args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':None, 'gamma':0.2,
+            'm':args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':16, 'gamma':0.2,
             }
     layer2 = {
-            'm':args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':None, 'gamma':0.02,
+            'm':2*args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':32, 'gamma':0.2,
             }
     model = layers.CCNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
     model.train(dataset_train, nn.CrossEntropyLoss(), 'fro', n_epochs=args.epochs, batch_size=64, lr=args.lr)
@@ -63,6 +62,8 @@ def mnist_experiment(args):
         acc = test_all(model, dataloader_test)
         for l, layer_acc in enumerate(acc):
             print("Accuracy: {:.2f}% on {} samples for layer {}".format(layer_acc*100, len(dataset_test), l))
+        if layers.SAFETY_CHECK:
+            assert torch.norm(acc[-1] - test(model, dataloader_test)) <=1e-4
         return acc[-1].item()
     else:
         acc = test(model, dataloader_test)

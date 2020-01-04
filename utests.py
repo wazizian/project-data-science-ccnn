@@ -9,7 +9,7 @@ import main as main
 class BasicTestCase(unittest.TestCase):
     def testCCNNLayerLinearDim(self):
         l = layers.CCNNLayerLinear(5, 9, 2, 1)
-        z = torch.zeros((5, 9, 5))
+        z = torch.zeros((5, 3, 3, 5))
         output = l.forward(z)
         self.assertEqual(output.size(), (5, 2))
 
