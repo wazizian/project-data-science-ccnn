@@ -6,17 +6,20 @@ import torch.utils.data as data
 import torchvision
 import layers
 import argparse
+import cnn
 import orion
 import orion.client
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', type=float, default=1e-3)
+parser.add_argument('--gamma', type=float, default=0.2)
 parser.add_argument('--approx_m', type=int, default=100, help="m")
 parser.add_argument('--R', type=float, default=1)
 parser.add_argument('--epochs', type=int, default=10)
 parser.add_argument('--hunt', action='store_true', help="Hyperparameter search mode with orion")
 parser.add_argument('--test', action='store_true', help="Train on train+val and test on test")
 parser.add_argument('--eval_all', action='store_true')
+parser.add_argument('--cnn', action='store_true')
 
 
 def test(model: nn.Module, dataloader: data.DataLoader) -> float:
@@ -50,12 +53,15 @@ def mnist_experiment(args):
         dataset_train, dataset_test = data.random_split(dataset_for_trainval, [n_train, n_val])
     print("Split for {}: {}/{} samples".format("test" if args.test else "validation", len(dataset_train), len(dataset_test)))
     layer1 = {
-            'm':args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':16, 'gamma':0.2,
+            'm':args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':16, 'gamma':args.gamma,
             }
     layer2 = {
-            'm':2*args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':32, 'gamma':0.2,
+            'm':2*args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':32, 'gamma':args.gamma,
             }
-    model = layers.CCNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
+    if args.cnn:
+        model = cnn.CNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
+    else:
+        model = layers.CCNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
     model.train(dataset_train, nn.CrossEntropyLoss(), 'fro', n_epochs=args.epochs, batch_size=64, lr=args.lr)
     dataloader_test = data.DataLoader(dataset_test, batch_size=64)
     if args.eval_all:
