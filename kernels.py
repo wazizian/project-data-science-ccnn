@@ -24,6 +24,9 @@ class ApproxKernelMachine:
         self.X_shape = X.shape
         print('Fitting kernel with samples of shape '.format(self.X_shape))
         self.Q = self.kernel_approx.fit_transform(np.reshape(X, (-1, self.X_shape[-1])))
+        pinvQ = np.linalg.pinv(self.Q)
+        self.pinvQQ = pinvQ @ self.Q 
+        #in general pinvQQ is extremely close to identity: np.linalg.norm(self.pinvQQ-np.identity(len(self.pinvQQ)))) ~ 1e-11
         self.Q = np.reshape(self.Q, X.shape[:-1] + (self.m,))
 
     def buid_kernel_patch_dataset(self, labels: torch.Tensor) -> data.Dataset:
@@ -40,9 +43,5 @@ class ApproxKernelMachine:
         """
         assert X.shape[1:] == self.X_shape[1:]
         b = X.shape[0]
-        transformed = self.kernel_approx.transform(np.reshape(X, (-1, self.X_shape[-1])))
+        transformed = self.kernel_approx.transform(np.reshape(X, (-1, self.X_shape[-1]))) @ self.pinvQQ.T
         return torch.from_numpy(np.reshape(transformed, (b,) + self.Q.shape[1:])).float()
-
-        
-        
-
