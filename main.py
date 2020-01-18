@@ -7,8 +7,6 @@ import torchvision
 import layers
 import argparse
 import cnn
-import orion
-import orion.client
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', type=float, default=1e-3)
@@ -21,7 +19,7 @@ parser.add_argument('--test', action='store_true', help="Train on train+val and 
 parser.add_argument('--eval_all', action='store_true')
 parser.add_argument('--cnn', action='store_true')
 
-
+@torch.no_grad()
 def test(model: nn.Module, dataloader: data.DataLoader) -> float:
     acc = 0.
     for i, (x, y) in enumerate(dataloader):
@@ -30,6 +28,7 @@ def test(model: nn.Module, dataloader: data.DataLoader) -> float:
     acc /= i + 1
     return acc
 
+@torch.no_grad()
 def test_all(model: nn.Module, dataloader: data.DataLoader) -> float:
     print("Beginning testing")
     acc = torch.zeros(len(model.layers))
@@ -80,6 +79,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     acc = mnist_experiment(args)
     if args.hunt:
+        #Orion is needed at this point
+        import orion
+        import orion.client
         assert not args.test
         orion.client.report_results([{
             'name': 'test_error_rate',
