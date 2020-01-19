@@ -52,6 +52,7 @@ def mnist_experiment(args):
         n_val = len(dataset_for_trainval) - n_train
         dataset_train, dataset_test = data.random_split(dataset_for_trainval, [n_train, n_val])
     print("Split for {}: {}/{} samples".format("test" if args.test else "validation", len(dataset_train), len(dataset_test)))
+    print("lr = {:.5f} gamma = {:.5f}".format(args.lr, args.gamma))
     layer1 = {
             'm':args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':16, 'gamma':args.gamma,
             }
