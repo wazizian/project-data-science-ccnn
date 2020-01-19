@@ -63,7 +63,7 @@ def mnist_experiment(args):
     else:
         model = layers.CCNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
     model.train(dataset_train, nn.CrossEntropyLoss(), 'fro', n_epochs=args.epochs, batch_size=64, lr=args.lr, verbose=args.verbose)
-    dataloader_test = data.DataLoader(dataset_test, batch_size=64)
+    dataloader_test = data.DataLoader(dataset_test, batch_size=64, num_workers=layers.NUM_WORKERS)
     if args.eval_all:
         acc = test_all(model, dataloader_test)
         for l, layer_acc in enumerate(acc):

@@ -9,6 +9,7 @@ import sklearn.feature_extraction.image as image
 from typing import List
 
 SAFETY_CHECK=False
+NUM_WORKERS=0
 
 class CCNNLayerLinear(nn.Module):
     def __init__(self, m: int, P: int, d2: int, R: float, avg_pooling_kernel_size: int=1):
@@ -150,7 +151,7 @@ class CCNNLayer(nn.Module):
             # x   has shape (b, c, h, h)
             # out has shape (b, self.h, self.h, self.d1)
             transform = lambda x: self.kernel.transform(self.extract_patches(x))
-        dataloader = data.DataLoader(dataset, batch_size=batch_size)
+        dataloader = data.DataLoader(dataset, batch_size=batch_size, num_workers=NUM_WORKERS)
         logger = self.linear.train(dataloader, criterion, p, n_epochs, lr, transform, verbose=verbose)
         self.linear.compute_approx_svd(self.r)
         return logger
