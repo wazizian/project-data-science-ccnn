@@ -49,3 +49,26 @@ class ApproxKernelMachine:
         b = X.shape[0]
         transformed = self.kernel_approx.transform(np.reshape(X, (-1, self.X_shape[-1])))# @ self.pinvQQ.T
         return torch.from_numpy(np.reshape(transformed, (b,) + self.Q.shape[1:])).float()
+
+
+class LightApproxKernelMachine:
+    def __init__(self, kernel, d1, m, gamma=0.2):
+        self.m = m
+        self.d1 = d1
+        if kernel != 'rbf':
+            raise NotImplementedError
+        self.kernel_approx = kernel_approximation.RBFSampler(gamma=gamma, n_components=m)
+        # according to the source code of RBF sampler, this actually uses only d_1
+        # and not the data
+        self.kernel_approx.fit(np.zeros((1, d1)))
+
+    def transform(self, X: torch.Tensor) -> torch.Tensor:
+        """
+        X has shape (*, d1)
+        out has shape (*, m)
+        """
+        X_view = X.view(-1, self.d1)
+        transformed = self.kernel_approx.transform(X_view.numpy())
+        assert transformed.shape[1] == self.m
+        assert transformed.shape[0] == X_view.size(0)
+        return torch.from_numpy(transformed).float().view(X.size()[:-1] + (self.m,))

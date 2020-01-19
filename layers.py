@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data as data
-from kernels import ApproxKernelMachine
+from kernels import LightApproxKernelMachine
 import logger
 import numpy as np
 import sklearn.feature_extraction.image as image
@@ -57,13 +57,13 @@ class CCNNLayerLinear(nn.Module):
         else:
             raise NotImplementedError
 
-    def train(self, dataloaderZ: data.DataLoader, criterion, p, n_epochs, lr):
+    def train(self, dataloader: data.DataLoader, criterion, p, n_epochs, lr, transform):
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        print("Beginning training with {} batches of size <={}.".format(len(dataloaderZ), dataloaderZ.batch_size))
-        log = logger.Logger(n_epochs, len(dataloaderZ))
+        print("Beginning training with {} batches of size <={}.".format(len(dataloader), dataloader.batch_size))
+        log = logger.Logger(n_epochs, len(dataloader))
         for epoch in range(n_epochs):
-            for iteration, (z, y) in enumerate(dataloaderZ):
-                output = self.forward(z)
+            for iteration, (z, y) in enumerate(dataloader):
+                output = self.forward(transform(z))
                 loss = criterion(output, y)
                 optimizer.zero_grad()
                 loss.backward()
@@ -110,7 +110,8 @@ class CCNNLayer(nn.Module):
         assert h == w
         self.P = ((h - patch_dim)//patch_stride + 1)**2
         self.h = (h - patch_dim)//patch_stride + 1
-        self.kernel = ApproxKernelMachine(kernel, m, gamma=gamma)
+        self.d1 = c * patch_dim**2
+        self.kernel = LightApproxKernelMachine(kernel, self.d1, m, gamma=gamma)
         self.linear = CCNNLayerLinear(m, self.P, d2, R, avg_pooling_kernel_size=avg_pooling_kernel_size)
         self.hprime = self.linear.hprime
         self.patch_dim = patch_dim
@@ -123,7 +124,7 @@ class CCNNLayer(nn.Module):
     def extract_patches(self, imgs: torch.Tensor) -> torch.Tensor:
         """
         imgs has shape (b, c, h, h)
-        output has shape (b, self.h, self.h, d1) where d1 = c * self.patch_dim**2
+        output has shape (b, self.h, self.h, self.d1) 
         """
         (b, c, h, w) = imgs.size()
         assert h == w
@@ -144,10 +145,13 @@ class CCNNLayer(nn.Module):
         self.kernel.fit(inputs)
         return self.kernel.buid_kernel_patch_dataset(labels)
 
-    def train(self, dataset, criterion, p, n_epochs, batch_size, lr) -> logger.Logger:
-        self.train_dataset = self.build_train_dataset(dataset)
-        dataloader = data.DataLoader(self.train_dataset, batch_size=batch_size)
-        logger = self.linear.train(dataloader, criterion, p, n_epochs, lr)
+    def train(self, dataset, criterion, p, n_epochs, batch_size, lr, transform) -> logger.Logger:
+        if not transform:
+            # x   has shape (b, c, h, h)
+            # out has shape (b, self.h, self.h, self.d1)
+            transform = lambda x: self.kernel.transform(self.extract_patches(x))
+        dataloader = data.DataLoader(dataset, batch_size=batch_size)
+        logger = self.linear.train(dataloader, criterion, p, n_epochs, lr, transform)
         self.linear.compute_approx_svd(self.r)
         return logger
 
@@ -162,12 +166,15 @@ class CCNNLayer(nn.Module):
 
     def forward(self, imgs: torch.Tensor, last=True) -> torch.Tensor:
         patches = self.extract_patches(imgs)
-        kernel_patches = self.kernel.transform(patches.numpy()) 
+        kernel_patches = self.kernel.transform(patches)
         if last:
             return self.linear.forward(kernel_patches)
         else:
+            # transformed has shape (b, h', h', m)
             transformed = self.linear.apply_filters(kernel_patches)
+            # transformed has shape (b, h', h', r)
             transformed = transformed.permute(0, 3, 1, 2)
+            # transformed has shape (b, r, h', h')
             return transformed
 
 class CCNN(nn.Module):
@@ -181,13 +188,24 @@ class CCNN(nn.Module):
             in_shape = (current_layer.r, current_layer.linear.hprime, current_layer.linear.hprime)
         self.layers = nn.ModuleList(layer_lst)
 
+    def make_transform(self, layer_index):
+        def transform(x: torch.Tensor) -> torch.Tensor:
+            # x has shape (b, c, h, h)
+            for i in range(layer_index):
+                x = self.layers[i].forward(x, last=False)
+            # x has shape (b, c, h, h) (where c is the last r, etc...)
+            # out has shape (b, self.h, self.h, self.d1)
+            curr_layer = self.layers[layer_index]
+            return curr_layer.kernel.transform(curr_layer.extract_patches(x))
+        return transform
+
+
     def train(self, dataset, criterion, p, n_epochs, batch_size, lr) -> List[logger.Logger]:
-        train_dataset = dataset
         loggers = []
-        for l in self.layers:
-            logger = l.train(train_dataset, criterion, p, n_epochs, batch_size, lr)
+        for i, l in enumerate(self.layers):
+            transform = self.make_transform(i)
+            logger = l.train(dataset, criterion, p, n_epochs, batch_size, lr, transform=transform)
             loggers.append(logger)
-            train_dataset = l.build_next_layer_dataset()
         return loggers
 
     @torch.no_grad()

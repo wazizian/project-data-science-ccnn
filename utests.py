@@ -24,6 +24,14 @@ class BasicTestCase(unittest.TestCase):
         output = kernel.transform(batch)
         self.assertEqual(output.size(), (b, P, m))
 
+    def testLightApproxKernelMachineDim(self):
+        P, d1, m, b = 10, 10, 10, 5
+        kernel = kernels.LightApproxKernelMachine('rbf', d1, m)
+        batch = np.random.randn(b, P, d1)
+        output = kernel.transform(torch.from_numpy(batch))
+        self.assertEqual(output.size(), (b, P, m))
+
+
 class TrainMNISTTestCase(unittest.TestCase):
     def testNoError(self):
         args = main.parser.parse_args([
