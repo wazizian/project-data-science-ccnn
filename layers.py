@@ -135,12 +135,14 @@ class CCNNLayer(nn.Module):
         patches = patches.reshape(b, self.h, self.h, c * self.patch_dim ** 2)
         return patches
 
+    ### NOT USED ON THIS BRANCH ###
     def build_patch_dataset(self, dataset: data.Dataset) -> (np.ndarray, torch.Tensor):
         length = len(dataset)
         (inputs, labels) = next(data.DataLoader(dataset, batch_size=length).__iter__())
         inputs = self.extract_patches(inputs)
         return inputs.numpy(), labels
 
+    ### NOT USED ON THIS BRANCH ###
     def build_train_dataset(self, dataset: data.Dataset) -> data.Dataset:
         inputs, labels = self.build_patch_dataset(dataset)
         self.kernel.fit(inputs)
@@ -156,6 +158,7 @@ class CCNNLayer(nn.Module):
         self.linear.compute_approx_svd(self.r)
         return logger
 
+    ### NOT USED ON THIS BRANCH ###
     def build_next_layer_dataset(self) -> data.Dataset:
         (inputs, labels) = next(data.DataLoader(self.train_dataset, batch_size=len(self.train_dataset)).__iter__())
         transformed = self.linear.apply_filters(inputs)
@@ -165,6 +168,7 @@ class CCNNLayer(nn.Module):
         transformed = transformed.permute(0, 3, 1, 2)
         return data.TensorDataset(transformed, labels)
 
+    @torch.no_grad()
     def forward(self, imgs: torch.Tensor, last=True) -> torch.Tensor:
         patches = self.extract_patches(imgs)
         kernel_patches = self.kernel.transform(patches)
