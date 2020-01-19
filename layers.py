@@ -9,7 +9,7 @@ import sklearn.feature_extraction.image as image
 from typing import List
 
 SAFETY_CHECK=False
-NUM_WORKERS=0
+NUM_WORKERS=4
 
 class CCNNLayerLinear(nn.Module):
     def __init__(self, m: int, P: int, d2: int, R: float, avg_pooling_kernel_size: int=1):
@@ -71,8 +71,9 @@ class CCNNLayerLinear(nn.Module):
                 optimizer.step()
                 self.project(p)
                 accuracy = (output.max(-1)[1] == y).float().mean()
-                log.log_iteration(epoch, iteration, loss, accuracy)
-        return logger
+                log.log_iteration(epoch, iteration, loss.item(), accuracy.item())
+                log.log_test(epoch, iteration, self, transform)
+        return log
 
     @torch.no_grad()
     def compute_approx_svd(self, r):
@@ -154,9 +155,9 @@ class CCNNLayer(nn.Module):
             # out has shape (b, self.h, self.h, self.d1)
             transform = lambda x: self.kernel.transform(self.extract_patches(x))
         dataloader = data.DataLoader(dataset, batch_size=batch_size, num_workers=NUM_WORKERS)
-        logger = self.linear.train(dataloader, criterion, p, n_epochs, lr, transform, verbose=verbose)
+        log = self.linear.train(dataloader, criterion, p, n_epochs, lr, transform, verbose=verbose)
         self.linear.compute_approx_svd(self.r)
-        return logger
+        return log
 
     ### NOT USED ON THIS BRANCH ###
     def build_next_layer_dataset(self) -> data.Dataset:
@@ -209,8 +210,8 @@ class CCNN(nn.Module):
         loggers = []
         for i, l in enumerate(self.layers):
             transform = self.make_transform(i)
-            logger = l.train(dataset, criterion, p, n_epochs, batch_size, lr, transform=transform, verbose=verbose)
-            loggers.append(logger)
+            log = l.train(dataset, criterion, p, n_epochs, batch_size, lr, transform=transform, verbose=verbose)
+            loggers.append(log)
         return loggers
 
     @torch.no_grad()

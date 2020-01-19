@@ -7,6 +7,7 @@ import torchvision
 import layers
 import argparse
 import cnn
+import logger
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', type=float, default=1e-3)
@@ -45,12 +46,18 @@ def mnist_experiment(args):
     #10k samples
     dataset_for_trainval = torchvision.datasets.MNIST('dataset', train=False, transform=torchvision.transforms.ToTensor(), download=True)
     if args.test:
-        dataset_train = dataset_for_trainval
-        dataset_test  = dataset_for_test
+        n_train = 5000
+        n_out = len(dataset_for_trainval) - n_train
+        dataset_train, _ = data.random_split(dataset_for_trainval, [n_train, n_out])
+        n_out = len(dataset_for_test) - n_train
+        dataset_test, _  = data.random_split(dataset_for_test, [n_train, n_out])
     else:
         n_train = 5000
         n_val = len(dataset_for_trainval) - n_train
         dataset_train, dataset_test = data.random_split(dataset_for_trainval, [n_train, n_val])
+    dataloader_test = data.DataLoader(dataset_test, batch_size=64, num_workers=layers.NUM_WORKERS)
+    if args.test:
+        logger.Logger.dataloader_test = dataloader_test
     print("Split for {}: {}/{} samples".format("test" if args.test else "validation", len(dataset_train), len(dataset_test)))
     print("lr = {:.5f} gamma = {:.5f}".format(args.lr, args.gamma))
     layer1 = {
@@ -63,9 +70,11 @@ def mnist_experiment(args):
         model = cnn.CNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
     else:
         model = layers.CCNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
-    model.train(dataset_train, nn.CrossEntropyLoss(), 'fro', n_epochs=args.epochs, batch_size=64, lr=args.lr, verbose=args.verbose)
-    dataloader_test = data.DataLoader(dataset_test, batch_size=64, num_workers=layers.NUM_WORKERS)
-    if args.eval_all:
+    loggers = model.train(dataset_train, nn.CrossEntropyLoss(), 'fro', n_epochs=args.epochs, batch_size=64, lr=args.lr, verbose=args.verbose)
+    if args.test:
+        for i, log in enumerate(loggers):
+            log.save('layer_{}'.format(i))
+    elif args.eval_all:
         acc = test_all(model, dataloader_test)
         for l, layer_acc in enumerate(acc):
             print("Accuracy: {:.2f}% on {} samples for layer {}".format(layer_acc*100, len(dataset_test), l))

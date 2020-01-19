@@ -13,5 +13,9 @@ hunt:
 debug_hunt:
 	orion --debug hunt -n mnist2 --max-trials 2 --pool-size 2 ./main.py --hunt --lr~'loguniform(1e-5, 1.0)' --approx_m 2 --epoch 1
 
+quick_test:
+	./main.py --eval_all --lr 0.0005 --approx_m 32 --epoch 5 --test
+
 test:
-	./main.py --eval_all --lr 0.0005 --approx_m 32 --epoch 5
+	./main.py --eval_all --test --gamma 0.59 --lr 4.5e-05 --approx_m 500 --epoch 3 --verbose
+
