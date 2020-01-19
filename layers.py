@@ -123,7 +123,7 @@ class CCNNLayer(nn.Module):
     def extract_patches(self, imgs: torch.Tensor) -> torch.Tensor:
         """
         imgs has shape (b, c, h, h)
-        output has shape (c, self.h, self.h, d1) where d1 = c * self.patch_dim**2
+        output has shape (b, self.h, self.h, d1) where d1 = c * self.patch_dim**2
         """
         (b, c, h, w) = imgs.size()
         assert h == w
