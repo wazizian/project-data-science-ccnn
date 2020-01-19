@@ -57,10 +57,10 @@ class CCNNLayerLinear(nn.Module):
         else:
             raise NotImplementedError
 
-    def train(self, dataloader: data.DataLoader, criterion, p, n_epochs, lr, transform):
+    def train(self, dataloader: data.DataLoader, criterion, p, n_epochs, lr, transform, verbose=True):
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         print("Beginning training with {} batches of size <={}.".format(len(dataloader), dataloader.batch_size))
-        log = logger.Logger(n_epochs, len(dataloader))
+        log = logger.Logger(n_epochs, len(dataloader), verbose=verbose)
         for epoch in range(n_epochs):
             for iteration, (z, y) in enumerate(dataloader):
                 output = self.forward(transform(z))
@@ -145,13 +145,13 @@ class CCNNLayer(nn.Module):
         self.kernel.fit(inputs)
         return self.kernel.buid_kernel_patch_dataset(labels)
 
-    def train(self, dataset, criterion, p, n_epochs, batch_size, lr, transform) -> logger.Logger:
+    def train(self, dataset, criterion, p, n_epochs, batch_size, lr, transform, verbose=True) -> logger.Logger:
         if not transform:
             # x   has shape (b, c, h, h)
             # out has shape (b, self.h, self.h, self.d1)
             transform = lambda x: self.kernel.transform(self.extract_patches(x))
         dataloader = data.DataLoader(dataset, batch_size=batch_size)
-        logger = self.linear.train(dataloader, criterion, p, n_epochs, lr, transform)
+        logger = self.linear.train(dataloader, criterion, p, n_epochs, lr, transform, verbose=verbose)
         self.linear.compute_approx_svd(self.r)
         return logger
 
@@ -200,11 +200,11 @@ class CCNN(nn.Module):
         return transform
 
 
-    def train(self, dataset, criterion, p, n_epochs, batch_size, lr) -> List[logger.Logger]:
+    def train(self, dataset, criterion, p, n_epochs, batch_size, lr, verbose=True) -> List[logger.Logger]:
         loggers = []
         for i, l in enumerate(self.layers):
             transform = self.make_transform(i)
-            logger = l.train(dataset, criterion, p, n_epochs, batch_size, lr, transform=transform)
+            logger = l.train(dataset, criterion, p, n_epochs, batch_size, lr, transform=transform, verbose=verbose)
             loggers.append(logger)
         return loggers
 

@@ -18,6 +18,7 @@ parser.add_argument('--hunt', action='store_true', help="Hyperparameter search m
 parser.add_argument('--test', action='store_true', help="Train on train+val and test on test")
 parser.add_argument('--eval_all', action='store_true')
 parser.add_argument('--cnn', action='store_true')
+parser.add_argument('-v', '--verbose', action='store_true')
 
 @torch.no_grad()
 def test(model: nn.Module, dataloader: data.DataLoader) -> float:
@@ -61,7 +62,7 @@ def mnist_experiment(args):
         model = cnn.CNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
     else:
         model = layers.CCNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
-    model.train(dataset_train, nn.CrossEntropyLoss(), 'fro', n_epochs=args.epochs, batch_size=64, lr=args.lr)
+    model.train(dataset_train, nn.CrossEntropyLoss(), 'fro', n_epochs=args.epochs, batch_size=64, lr=args.lr, verbose=args.verbose)
     dataloader_test = data.DataLoader(dataset_test, batch_size=64)
     if args.eval_all:
         acc = test_all(model, dataloader_test)

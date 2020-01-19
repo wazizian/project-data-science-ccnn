@@ -41,11 +41,11 @@ class CNN(nn.Module):
             predictions.append(linear(torch.flatten(x, start_dim=1)))
         return torch.stack(predictions)
 
-    def train(self, dataset, criterion, _, n_epochs=100, batch_size=64, lr=1e-3):
+    def train(self, dataset, criterion, _, n_epochs=100, batch_size=64, lr=1e-3, verbose=True):
         dataloader = data.DataLoader(dataset, batch_size=64)
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         print("Beginning training with {} batches of size <={}.".format(len(dataloader), dataloader.batch_size))
-        log = logger.Logger(n_epochs, len(dataloader))
+        log = logger.Logger(n_epochs, len(dataloader), verbose=verbose)
         for epoch in range(n_epochs):
             for iteration, (x, y) in enumerate(dataloader):
                 output = self.forward(x)
