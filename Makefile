@@ -5,7 +5,7 @@ unittests:
 .PHONY: hunt
 NAME=MNIST_lazy_500
 MAX_TRIALS=2
-CMD=./main.py --hunt --lr~'loguniform(1e-5, 1e-2)' --gamma~'loguniform(0.02, 2)' --approx_m 500 --epoch 10
+CMD=./main.py --hunt --lr~'loguniform(1e-5, 1e-2)' --gamma~'loguniform(0.02, 2)' --approx_m 500 --epoch 3
 hunt:
 	orion hunt -n $(NAME) --worker-trials $(MAX_TRIALS) $(CMD) &
 	orion hunt -n $(NAME) --worker-trials $(MAX_TRIALS) $(CMD) &
