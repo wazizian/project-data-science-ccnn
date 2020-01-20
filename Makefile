@@ -19,3 +19,6 @@ quick_test:
 test:
 	./main.py --eval_all --test --gamma 0.59 --lr 4.5e-05 --approx_m 500 --epoch 3 --verbose
 
+test_cnn:
+	./main.py --test --cnn --lr 0.008545 --epoch 3 --verbose --activation quad
+

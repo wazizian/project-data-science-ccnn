@@ -19,6 +19,7 @@ parser.add_argument('--hunt', action='store_true', help="Hyperparameter search m
 parser.add_argument('--test', action='store_true', help="Train on train+val and test on test")
 parser.add_argument('--eval_all', action='store_true')
 parser.add_argument('--cnn', action='store_true')
+parser.add_argument('--activation', type=str, default="relu")
 parser.add_argument('-v', '--verbose', action='store_true')
 
 @torch.no_grad()
@@ -67,7 +68,7 @@ def mnist_experiment(args):
             'm':2*args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':32, 'gamma':args.gamma,
             }
     if args.cnn:
-        model = cnn.CNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
+        model = cnn.CNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2], activation_func=args.activation)
     else:
         model = layers.CCNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
     loggers = model.train(dataset_train, nn.CrossEntropyLoss(), 'fro', n_epochs=args.epochs, batch_size=64, lr=args.lr, verbose=args.verbose)

@@ -1,23 +1,41 @@
 import torch
 import torch.nn as nn
 import torch.utils.data as data
+import torch.nn.functional as F
 import logger
+
+class Activation(nn.Module):
+    def __init__(self, func):
+        super(Activation, self).__init__()
+        if func == "quad":
+            self.func = lambda x : x**2
+        elif func == "sin":
+            self.func = torch.sin
+        elif func == "relu":
+            self.func = F.relu
+        else:
+            raise NotImplementedError
+
+    def forward(self, x):
+        return self.func(x)
+
 
 """
 This class is designed to satisfy the same interface as CCNN
 """
 class CNN(nn.Module):
-    def __init__(self, img_shape, layer_confs, bias=False):
+    def __init__(self, img_shape, layer_confs, bias=False, activation_func="relu"):
         super(CNN, self).__init__()
         self.layers = nn.ModuleList()
         self.linears = nn.ModuleList()
         in_channels = img_shape[0]
         h_in = img_shape[1]
         assert h_in == img_shape[2]
+        activation = Activation(activation_func)
         for layer_conf in layer_confs:
             layer = nn.Sequential(
                     nn.Conv2d(in_channels, layer_conf['r'], kernel_size=layer_conf['patch_dim'], stride=layer_conf['patch_stride'], bias=bias),
-                    nn.ReLU(),
+                    activation,
                     nn.AvgPool2d(layer_conf['avg_pooling_kernel_size'])
                     )
             self.layers.append(layer)
@@ -54,8 +72,9 @@ class CNN(nn.Module):
                 loss.backward()
                 optimizer.step()
                 accuracy = (output.max(-1)[1] == y).float().mean()
-                log.log_iteration(epoch, iteration, loss, accuracy)
-        return logger
+                log.log_iteration(epoch, iteration, loss.item(), accuracy.item())
+                log.log_test(epoch, iteration, self, lambda x: x)
+        return [log]
 
 
 

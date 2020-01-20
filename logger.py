@@ -14,7 +14,7 @@ class Logger:
         self.n_epochs = n_epochs
         self.n_iterations = n_iterations
         self.print_freq = print_freq if print_freq else 1
-        self.test_freq = 15
+        self.test_freq = 5
         self.verbose = verbose
 
     def log_iteration(self, epoch, iteration, loss, accuracy):
