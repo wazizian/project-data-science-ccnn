@@ -2,50 +2,70 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data as data
-from kernels import LightApproxKernelMachine
+import math
 import logger
-import numpy as np
-import sklearn.feature_extraction.image as image
 from typing import List
 
 SAFETY_CHECK=False
 NUM_WORKERS=4
 
-class CCNNLayerLinear(nn.Module):
-    def __init__(self, m: int, P: int, d2: int, R: float, avg_pooling_kernel_size: int=1):
+class Conv2dRFF(nn.Module):
+    """
+    2d Convolutionnal layer with Random Fourier Features approximation
+
+    It is the compossition of a 2d convolution and Random Fourier features
+    approximation for the Gaussian kernel.
+
+    It is inspired from sklearn.kernel_approximation.RBFSampler and implements
+    the algorithm from "Random Features for Large-Scale Kernel Machines"
+    by Ali Rahimi and Ben Recht.
+    """
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int,
+            gamma: float, **kwargs):
+        super(Conv2dRFF, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, **kwargs)
+        self.conv.weight.detach()
+        self.conv.bias.detach()
+        nn.init.normal_(self.conv.weight.data, std=math.sqrt(2*gamma))
+        nn.init.uniform_(self.conv.bias.data, a=0., b=2*math.pi)
+        self.activation = torch.cos
+        self.scale = math.sqrt(2/out_channels)
+
+    def forward(self, x):
         """
-        P: nb of patches
+        x: shape b, h_in, w_in, in_channels
+        returns: shape b, h_out, w_out, out_channels
+        """
+        x = self.conv(x)
+        x = self.activation(x)
+        return  self.scale * x
+
+
+
+class CCNNLayerLinear(nn.Module):
+    def __init__(self, m: int, h: int, d2: int, R: float, avg_pooling_kernel_size: int=1):
+        """
+        h: dim of new image
         m: rank of kernel factorization
         d2: output features
         R: norm constraint
         """
         super(CCNNLayerLinear, self).__init__()
         self.m = m
-        self.P = P
-        self.h = int(np.sqrt(self.P))
-        assert self.h**2 == self.P
+        self.P = h**2
+        self.h = h
         self.hprime = self.h // avg_pooling_kernel_size
         self.Pprime = self.hprime**2
         self.d2 = d2
         self.R = R
         self.A = nn.Parameter(torch.zeros((self.m, self.hprime, self.hprime, self.d2)).normal_(), requires_grad=True)
-        self.avg_pooling_layer = nn.AvgPool2d(avg_pooling_kernel_size)
-
-    def avg_pooling(self, z: torch.Tensor) -> torch.Tensor:
-        """
-        z has size (b, P, d1) and we assume P = h**2
-        we apply 2D average pooling to z.view(b, h, h, d1)
-        """
-        b, _, _, d1 = z.size()
-        assert (z.size(1) == self.h) and (z.size(2) == self.h)
-        return self.avg_pooling_layer(z.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
-
+        self.avg_pooling = nn.AvgPool2d(avg_pooling_kernel_size)
 
     def forward(self, z):
-        assert z.size()[1:] == (self.h, self.h, self.m), (z.size(), self.h, self.h, self.m)
+        assert z.size()[1:] == (self.m, self.h, self.h), (z.size(), self.m, self.h, self.h)
         z = self.avg_pooling(z)
-        assert z.size()[1:] == (self.hprime, self.hprime, self.m), (z.size(), self.hprime, self.hprime, self.m)
-        return torch.einsum('bijl,ljio->bo', z, self.A)
+        assert z.size()[1:] == (self.m, self.hprime, self.hprime), (z.size(), self.m, self.hprime, self.hprime)
+        return torch.einsum('blij,ljio->bo', z, self.A)
 
     @torch.no_grad()
     def project(self, p):
@@ -91,15 +111,18 @@ class CCNNLayerLinear(nn.Module):
     @torch.no_grad()
     def apply_filters(self, Z_in: torch.Tensor) -> torch.Tensor:
         """
-        Z has shape (b, h, h, m)
+        Z has shape (b, m, h, h)
         self.Uhat has shape (m, r)
-        output has shape (b, h', h', r)
+        output has shape (b, r, h', h')
         """
+        assert Z_in.size()[1:] == (self.m, self.h, self.h)
         Z = self.avg_pooling(Z_in)
-        Z = torch.einsum('bijl,lf->bijf', Z, self.Uhat)
+        assert    Z.size()[1:] == (self.m, self.hprime, self.hprime)
+        Z = torch.einsum('blij,lf->bfij', Z, self.Uhat)
+        assert    Z.size()[2:] == (self.hprime, self.hprime)
         #Safety check
         if SAFETY_CHECK:
-            pred = torch.einsum('bijf,fjio->bo', Z, self.other)
+            pred = torch.einsum('bfij,fjio->bo', Z, self.other)
             assert torch.norm(pred - self.forward(Z_in)) <= 1e-4, torch.norm(pred - self.forward(Z_in))
         return Z
 
@@ -112,74 +135,34 @@ class CCNNLayer(nn.Module):
         assert h == w
         self.P = ((h - patch_dim)//patch_stride + 1)**2
         self.h = (h - patch_dim)//patch_stride + 1
-        self.d1 = c * patch_dim**2
-        self.kernel = LightApproxKernelMachine(kernel, self.d1, m, gamma=gamma)
-        self.linear = CCNNLayerLinear(m, self.P, d2, R, avg_pooling_kernel_size=avg_pooling_kernel_size)
+        self.convRFF = Conv2dRFF(c, m, patch_dim, gamma)
+        self.linear = CCNNLayerLinear(m, self.h, d2, R, avg_pooling_kernel_size=avg_pooling_kernel_size)
         self.hprime = self.linear.hprime
         self.patch_dim = patch_dim
         self.patch_stride = patch_stride
         self.r = min(r,m) if r else m
         if r and self.r < r:
             print('Warning: r={} has been reduced to {}'.format(r, self.r))
-        print('Creating CCNN layer for input of shape {}x{}x{} with m={} P={} P\'={} d2={}'.format(*img_shape, m, self.P, self.linear.Pprime, d2))
-    
-    def extract_patches(self, imgs: torch.Tensor) -> torch.Tensor:
-        """
-        imgs has shape (b, c, h, h)
-        output has shape (b, self.h, self.h, self.d1) 
-        """
-        (b, c, h, w) = imgs.size()
-        assert h == w
-        patches = imgs.unfold(2, self.patch_dim, self.patch_stride).unfold(3, self.patch_dim, self.patch_stride)
-        assert patches.size() == (b, c, self.h, self.h, self.patch_dim, self.patch_dim)
-        patches = patches.permute(0, 2, 3, 1, 4, 5)
-        patches = patches.reshape(b, self.h, self.h, c * self.patch_dim ** 2)
-        return patches
-
-    ### NOT USED ON THIS BRANCH ###
-    def build_patch_dataset(self, dataset: data.Dataset) -> (np.ndarray, torch.Tensor):
-        length = len(dataset)
-        (inputs, labels) = next(data.DataLoader(dataset, batch_size=length).__iter__())
-        inputs = self.extract_patches(inputs)
-        return inputs.numpy(), labels
-
-    ### NOT USED ON THIS BRANCH ###
-    def build_train_dataset(self, dataset: data.Dataset) -> data.Dataset:
-        inputs, labels = self.build_patch_dataset(dataset)
-        self.kernel.fit(inputs)
-        return self.kernel.buid_kernel_patch_dataset(labels)
+        print('Creating CCNN layer for input of shape {}x{}x{} with m={} P={} P\'={} d2={}'.format(*img_shape, m, self.P, self.linear.Pprime, d2))    
 
     def train(self, dataset, criterion, p, n_epochs, batch_size, lr, transform, verbose=True) -> logger.Logger:
         if not transform:
             # x   has shape (b, c, h, h)
-            # out has shape (b, self.h, self.h, self.d1)
-            transform = lambda x: self.kernel.transform(self.extract_patches(x))
+            # out has shape (b, m, self.h, self.h)
+            transform = self.convRFF
         dataloader = data.DataLoader(dataset, batch_size=batch_size, num_workers=NUM_WORKERS)
         log = self.linear.train(dataloader, criterion, p, n_epochs, lr, transform, verbose=verbose)
         self.linear.compute_approx_svd(self.r)
         return log
 
-    ### NOT USED ON THIS BRANCH ###
-    def build_next_layer_dataset(self) -> data.Dataset:
-        (inputs, labels) = next(data.DataLoader(self.train_dataset, batch_size=len(self.train_dataset)).__iter__())
-        transformed = self.linear.apply_filters(inputs)
-        # transformed is supposed to have shape (b, h', h', r)
-        assert transformed.size()[1:] == (self.hprime, self.hprime, self.r)
-        # r is now the number of channels
-        transformed = transformed.permute(0, 3, 1, 2)
-        return data.TensorDataset(transformed, labels)
-
     @torch.no_grad()
     def forward(self, imgs: torch.Tensor, last=True) -> torch.Tensor:
-        patches = self.extract_patches(imgs)
-        kernel_patches = self.kernel.transform(patches)
+        kernel_patches = self.convRFF(imgs)
         if last:
             return self.linear.forward(kernel_patches)
         else:
-            # transformed has shape (b, h', h', m)
+            # transformed has shape (b, m, h', h')
             transformed = self.linear.apply_filters(kernel_patches)
-            # transformed has shape (b, h', h', r)
-            transformed = transformed.permute(0, 3, 1, 2)
             # transformed has shape (b, r, h', h')
             return transformed
 
@@ -200,9 +183,9 @@ class CCNN(nn.Module):
             for i in range(layer_index):
                 x = self.layers[i].forward(x, last=False)
             # x has shape (b, c, h, h) (where c is the last r, etc...)
-            # out has shape (b, self.h, self.h, self.d1)
+            # out has shape (b, m, self.h, self.h)
             curr_layer = self.layers[layer_index]
-            return curr_layer.kernel.transform(curr_layer.extract_patches(x))
+            return curr_layer.convRFF(x)
         return transform
 
 
