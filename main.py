@@ -7,13 +7,14 @@ import torchvision
 import layers
 import argparse
 import cnn
+import light_ccnn
 import logger
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--gamma', type=float, default=0.2)
 parser.add_argument('--approx_m', type=int, default=100, help="m")
-parser.add_argument('--R', type=float, default=1)
+parser.add_argument('--R_projection', type=float, default=1)
 parser.add_argument('--epochs', type=int, default=10)
 parser.add_argument('--hunt', action='store_true', help="Hyperparameter search mode with orion")
 parser.add_argument('--test', action='store_true', help="Evaluate on test set during training")
@@ -62,15 +63,12 @@ def mnist_experiment(args):
     print("Split for {}: {}/{} samples".format("test" if args.test else "validation", len(dataset_train), len(dataset_test)))
     print("lr = {:.5f} gamma = {:.5f}".format(args.lr, args.gamma))
     layer1 = {
-            'm':args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':16, 'gamma':args.gamma,
-            }
-    layer2 = {
-            'm':2*args.approx_m, 'd2':10, 'R':args.R, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':32, 'gamma':args.gamma,
+            'm':args.approx_m, 'd2':10, 'R':args.R_projection, 'patch_dim':5, 'patch_stride':1, 'kernel':'rbf', 'avg_pooling_kernel_size':2, 'r':16, 'gamma':args.gamma,
             }
     if args.cnn:
-        model = cnn.CNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2], activation_func=args.activation)
+        model = cnn.CNN(img_shape=(1, 28, 28), layer_confs=[layer1], activation_func=args.activation)
     else:
-        model = layers.CCNN(img_shape=(1, 28, 28), layer_confs=[layer1, layer2])
+        model = light_ccnn.LightCCNN((1, 28, 28), layer1)
     loggers = model.train(dataset_train, nn.CrossEntropyLoss(), 'fro', n_epochs=args.epochs, batch_size=64, lr=args.lr, verbose=args.verbose)
     if args.test:
         for i, log in enumerate(loggers):

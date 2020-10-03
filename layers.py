@@ -145,7 +145,7 @@ class CCNNLayer(nn.Module):
             print('Warning: r={} has been reduced to {}'.format(r, self.r))
         print('Creating CCNN layer for input of shape {}x{}x{} with m={} P={} P\'={} d2={}'.format(*img_shape, m, self.P, self.linear.Pprime, d2))    
 
-    def train(self, dataset, criterion, p, n_epochs, batch_size, lr, transform, verbose=True) -> logger.Logger:
+    def train(self, dataset, criterion, p, n_epochs, batch_size, lr, transform=None, verbose=True) -> logger.Logger:
         if not transform:
             # x   has shape (b, c, h, h)
             # out has shape (b, m, self.h, self.h)
